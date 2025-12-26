@@ -14,6 +14,10 @@ A document translation system that preserves the original layout of PDF document
 - **Font_Adjuster**: Component that calculates and applies appropriate font sizes to fit translated text in original text boxes
 - **Text_Block**: A bounded region containing text with position, dimensions, and styling information
 - **Image_Region**: An area in the PDF containing an image that may have embedded text
+- **Table_Detector**: Component that identifies and extracts table structures from PDF documents
+- **Table_Cell**: A single cell within a table with its boundaries, content, and row/column position
+- **Table_Structure**: Complete table representation including cells, rows, columns, and borders
+- **Language_Detector**: Component that automatically detects the source language of document text
 
 ## Requirements
 
@@ -102,3 +106,30 @@ A document translation system that preserves the original layout of PDF document
 3. WHEN multiple lines are required, THE Font_Adjuster SHALL calculate line breaks and adjust font size to fit all lines within the box height
 4. WHEN font adjustment is applied, THE Font_Adjuster SHALL attempt to match the original font family or use a similar fallback font
 5. WHEN the minimum font size (6pt) cannot fit the text, THE Font_Adjuster SHALL truncate with ellipsis and log a warning
+
+### Requirement 8: Table Detection and Handling
+
+**User Story:** As a user, I want tables in my PDF documents to be properly detected and translated while preserving their structure, so that tabular data remains readable and correctly formatted.
+
+#### Acceptance Criteria
+
+1. WHEN a PDF page contains tables, THE Table_Detector SHALL identify table regions and extract their structure (rows, columns, cells)
+2. WHEN extracting table cells, THE Table_Detector SHALL preserve cell boundaries, merged cells, and cell relationships
+3. WHEN translating table content, THE Translation_Service SHALL translate each cell independently while maintaining cell context
+4. WHEN reconstructing tables, THE Layout_Reconstructor SHALL preserve table borders, cell boundaries, and alignment
+5. WHEN translated cell text exceeds cell boundaries, THE Font_Adjuster SHALL reduce font size to fit within the cell without overflowing into adjacent cells
+6. WHEN a table spans multiple pages, THE Table_Detector SHALL handle continuation and maintain table integrity
+7. IF table detection fails, THEN THE PDF_Parser SHALL fall back to standard text block extraction for that region
+
+### Requirement 9: Automatic Language Detection
+
+**User Story:** As a user, I want the system to automatically detect the source language of my PDF document, so that I don't need to manually specify it and can simply provide the target language.
+
+#### Acceptance Criteria
+
+1. WHEN a PDF is processed, THE Language_Detector SHALL analyze extracted text to determine the source language
+2. WHEN detecting language, THE Language_Detector SHALL sample text from multiple pages for accuracy
+3. WHEN the source language is detected, THE Translation_Service SHALL use it for translation without user input
+4. WHEN multiple languages are detected in a document, THE Language_Detector SHALL identify the primary language and report secondary languages
+5. IF language detection confidence is below threshold, THEN THE Language_Detector SHALL log a warning and use the detected language with reduced confidence
+6. WHEN the user explicitly provides a source language, THE Document_Translator SHALL use the user-specified language instead of auto-detection

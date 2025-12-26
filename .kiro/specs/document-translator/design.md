@@ -14,9 +14,13 @@ flowchart TD
     B --> C{Content Type}
     C -->|Native Text| D[Text Blocks]
     C -->|Images| E[OCR Engine]
+    C -->|Tables| T[Table Detector]
+    T --> TC[Table Cells]
     E --> F[Image Text Blocks]
-    D --> G[Translation Service]
-    F --> G
+    D --> LD[Language Detector]
+    F --> LD
+    TC --> LD
+    LD --> G[Translation Service]
     G --> H[Translated Blocks]
     H --> I[Font Adjuster]
     I --> J[Layout Reconstructor]
@@ -25,10 +29,12 @@ flowchart TD
 
 ### High-Level Data Flow
 
-1. **Extraction Phase**: PDF_Parser extracts native text blocks and images with layout metadata
-2. **OCR Phase**: OCR_Engine processes images to extract embedded text with positions
-3. **Translation Phase**: Translation_Service batches text and calls Gemini API
-4. **Reconstruction Phase**: Layout_Reconstructor rebuilds PDF with Font_Adjuster handling text fitting
+1. **Extraction Phase**: PDF_Parser extracts native text blocks, images, and tables with layout metadata
+2. **Table Detection Phase**: Table_Detector identifies table structures and extracts cells with relationships
+3. **OCR Phase**: OCR_Engine processes images to extract embedded text with positions
+4. **Language Detection Phase**: Language_Detector analyzes extracted text to determine source language
+5. **Translation Phase**: Translation_Service batches text and calls Gemini API with detected/specified source language
+6. **Reconstruction Phase**: Layout_Reconstructor rebuilds PDF with Font_Adjuster handling text fitting (cell-aware for tables)
 
 ## Components and Interfaces
 
@@ -67,6 +73,72 @@ class PDFParser:
     
     def validate_pdf(self, pdf_path: str) -> Tuple[bool, Optional[str]]:
         """Validate PDF file and return (is_valid, error_message)."""
+        pass
+```
+
+### 7. Table_Detector
+
+Identifies and extracts table structures from PDF documents.
+
+```python
+@dataclass
+class TableCell:
+    text: str
+    bbox: BoundingBox
+    row_index: int
+    col_index: int
+    row_span: int = 1
+    col_span: int = 1
+    font_info: Optional[FontInfo] = None
+
+@dataclass
+class TableStructure:
+    bbox: BoundingBox
+    cells: List[TableCell]
+    num_rows: int
+    num_cols: int
+    page_number: int
+    has_header: bool = False
+
+class TableDetector:
+    def detect_tables(self, page: fitz.Page) -> List[TableStructure]:
+        """Detect all tables on a PDF page."""
+        pass
+    
+    def extract_cells(self, table_bbox: BoundingBox, page: fitz.Page) -> List[TableCell]:
+        """Extract cells from a detected table region."""
+        pass
+    
+    def identify_merged_cells(self, cells: List[TableCell]) -> List[TableCell]:
+        """Identify and mark merged cells in the table."""
+        pass
+```
+
+### 8. Language_Detector
+
+Automatically detects the source language of document text.
+
+```python
+@dataclass
+class LanguageDetectionResult:
+    primary_language: str
+    confidence: float
+    secondary_languages: List[Tuple[str, float]]  # (language, confidence)
+    sample_size: int
+
+class LanguageDetector:
+    CONFIDENCE_THRESHOLD: float = 0.7
+    
+    def __init__(self):
+        """Initialize language detection (uses langdetect library)."""
+        pass
+    
+    def detect_language(self, text_blocks: List[TextBlock]) -> LanguageDetectionResult:
+        """Detect language from multiple text blocks."""
+        pass
+    
+    def _sample_text(self, text_blocks: List[TextBlock], max_samples: int = 10) -> str:
+        """Sample text from blocks for detection."""
         pass
 ```
 
@@ -239,6 +311,7 @@ class ContentType(Enum):
     IMAGE_TEXT = "image_text"
     IMAGE = "image"
     GRAPHIC = "graphic"
+    TABLE_CELL = "table_cell"
 
 @dataclass
 class BoundingBox:
@@ -277,6 +350,46 @@ class TranslationUnit:
     page_number: int
     content_type: ContentType
     parent_image_index: Optional[int]  # For image-embedded text
+    table_cell_info: Optional[Tuple[int, int, int]]  # (table_index, row, col) for table cells
+```
+
+### Table Data Structures
+
+```python
+@dataclass
+class TableCell:
+    """A single cell within a table."""
+    text: str
+    bbox: BoundingBox
+    row_index: int
+    col_index: int
+    row_span: int = 1
+    col_span: int = 1
+    font_info: Optional[FontInfo] = None
+
+@dataclass
+class TableStructure:
+    """Complete table representation."""
+    bbox: BoundingBox
+    cells: List[TableCell]
+    num_rows: int
+    num_cols: int
+    page_number: int
+    index: int  # Table index on the page
+    has_header: bool = False
+    borders: List[Tuple[float, float, float, float]] = field(default_factory=list)  # Line segments
+```
+
+### Language Detection Data
+
+```python
+@dataclass
+class LanguageDetectionResult:
+    """Result of automatic language detection."""
+    primary_language: str
+    confidence: float
+    secondary_languages: List[Tuple[str, float]] = field(default_factory=list)
+    sample_size: int = 0
 ```
 
 ### Serialization Format
@@ -397,6 +510,30 @@ class DocumentState:
 
 **Validates: Requirements 6.4**
 
+### Property 16: Table Structure Preservation
+
+*For any* PDF containing tables, the Table_Detector shall identify table regions and extract cell contents with correct row/column positions, preserving the logical table structure.
+
+**Validates: Requirements 8.1, 8.2**
+
+### Property 17: Table Cell Boundary Respect
+
+*For any* translated table cell, the Font_Adjuster shall ensure the text fits within the cell boundaries without overflowing into adjacent cells.
+
+**Validates: Requirements 8.4, 8.5**
+
+### Property 18: Language Detection Accuracy
+
+*For any* document with sufficient text content, the Language_Detector shall correctly identify the primary language with confidence above the threshold, sampling from multiple pages when available.
+
+**Validates: Requirements 9.1, 9.2**
+
+### Property 19: User Language Override
+
+*For any* translation operation where the user explicitly specifies a source language, the system shall use the user-specified language instead of auto-detection.
+
+**Validates: Requirements 9.6**
+
 
 
 ## Error Handling
@@ -411,6 +548,8 @@ class DocumentState:
 | Translation Failures | API rejection, invalid response | Return original text with error flag |
 | Font Fitting | Text too long for minimum font | Truncate with ellipsis, log warning |
 | Resource Errors | GPU OOM, disk full | Fallback to CPU / abort with clear message |
+| Table Detection | Unrecognized table format | Fall back to text block extraction |
+| Language Detection | Low confidence, mixed languages | Use detected with warning, allow override |
 
 ### Error Response Structure
 
